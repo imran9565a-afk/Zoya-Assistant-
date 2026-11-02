@@ -156,24 +156,44 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun command(raw: String) {
         val s = raw.trim()
         val lower = s.lowercase(Locale.ROOT)
-        val greetingText = lower.trim()
+        val normalized = lower
             .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
-        val greetingWords = greetingText.split(" ").filter { it.isNotBlank() }
-        val isGreeting = greetingWords.firstOrNull() in setOf(
-            "assalamualaikum", "assalamu", "alaikum", "salam", "salaam",
-            "hello", "hi", "hey", "नमस्ते", "नमस्कार", "सलाम", "अस्सलामुअलैकुम"
-        ) && (greetingWords.size <= 3 || greetingWords.take(2) == listOf("assalamu", "alaikum"))
+
+        val greetings = setOf(
+            "assalamualaikum", "assalamu alaikum", "as salamu alaikum",
+            "as-salamu alaikum", "salam", "salaam", "hello", "hi", "hey",
+            "नमस्ते", "नमस्कार", "सलाम", "अस्सलामुअलैकुम"
+        )
+        val isGreeting = normalized in greetings ||
+            normalized.startsWith("assalamualaikum ") ||
+            normalized.startsWith("assalamu alaikum ") ||
+            normalized.startsWith("hello ") ||
+            normalized.startsWith("hi ") ||
+            normalized.startsWith("hey ") ||
+            normalized.startsWith("नमस्ते ") ||
+            normalized.startsWith("सलाम ") ||
+            normalized.startsWith("अस्सलामुअलैकुम ")
+
         when {
             isGreeting ->
                 say("वअलैकुम अस्सलाम! मैं ज़ोया हूँ। बताइए, मैं आपकी क्या मदद करूँ?")
+            normalized in setOf("how are you", "how are you doing", "कैसे हो", "कैसी हो", "आप कैसे हैं", "तुम कैसी हो") ->
+                say("मैं अच्छी हूँ, धन्यवाद! आप कैसे हैं? मैं आपकी क्या मदद करूँ?")
+            normalized in setOf("thank you", "thanks", "धन्यवाद", "शुक्रिया") ->
+                say("आपका स्वागत है! बताइए, और क्या मदद करूँ?")
+            normalized in setOf("who are you", "तुम कौन हो", "आप कौन हैं", "तुम्हारा नाम क्या है") ->
+                say("मैं ज़ोया हूँ, आपकी पर्सनल AI वॉइस असिस्टेंट।")
+            normalized in setOf("bye", "goodbye", "अलविदा", "बाय") ->
+                say("अल्लाह हाफ़िज़! फिर बात करेंगे।")
             lower.contains("समय") || lower.contains("time") ->
                 say("अभी समय है " + java.text.SimpleDateFormat("hh:mm a", Locale.getDefault()).format(java.util.Date()))
-            lower.contains("google") || lower.contains("गूगल") || lower.contains("search") || lower.contains("सर्च") ||
-                lower.contains("खोज") || lower.contains("बताओ") || lower.contains("कौन") || lower.contains("क्या") ||
-                lower.contains("कैसे") || lower.contains("कब") || lower.contains("कहाँ") || lower.contains("news") ||
-                lower.contains("price") || lower.contains("मौसम") -> searchTinyFish(s)
+            lower.contains("google") || lower.contains("गूगल") || lower.contains("search") ||
+                lower.contains("सर्च") || lower.contains("खोज") || lower.contains("इंटरनेट पर") ||
+                lower.contains("वेब पर") || lower.contains("news") || lower.contains("खबर") ||
+                lower.contains("price") || lower.contains("मौसम") ->
+                searchTinyFish(s)
             lower.contains("कॉल") || lower.contains("call") -> {
                 val name = s.replace(Regex("(?i)call|कॉल|करो|लगाओ|फोन"), "").trim()
                 val number = contactNumber(name)
@@ -192,10 +212,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     say("SMS composer खोल दिया है। भेजने से पहले संदेश जाँच लेना।")
                 }
             }
-            else -> searchTinyFish(s)
+            else ->
+                say("मैं अभी इस सवाल का जवाब खुद नहीं बना पा रही हूँ। इंटरनेट पर खोजने के लिए 'खोजो' या 'search' लिखें।")
         }
     }
-
 
     private fun readTinyFishApiKey(): String? {
         return try {
