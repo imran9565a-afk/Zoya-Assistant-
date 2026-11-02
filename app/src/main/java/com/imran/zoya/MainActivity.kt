@@ -43,6 +43,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val tinyFishAlias = "ZoyaTinyFishKey"
     private val geminiAlias = "ZoyaGeminiKey"
     private val networkExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var geminiBusy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -242,13 +243,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             say("पहले SET GEMINI API KEY में अपनी Gemini API Key सेव करें।")
             return
         }
+        if (geminiBusy) {
+            say("मैं अभी आपके पिछले सवाल का जवाब तैयार कर रही हूँ। कृपया उसका जवाब आने तक थोड़ा इंतज़ार करें।")
+            return
+        }
+        geminiBusy = true
         status.text = "ZOYA AI THINKING"
+        line("Zoya: आपका संदेश मिल गया है। मैं जवाब तैयार कर रही हूँ…")
         networkExecutor.execute {
             var connection: HttpURLConnection? = null
             try {
                 val previousId = securePrefs.getString("gemini_previous_interaction_id", null)
                 val payload = JSONObject().apply {
-                    put("model", "gemini-3.8-flash")
+                    put("model", "gemini-3.7-flash")
                     put("input", query)
                     put("system_instruction", "You are Zoya, a helpful, friendly AI assistant. Reply naturally and clearly in the same language as the user. Prefer Hindi when the user writes Hindi. Be accurate; if unsure, say so.")
                     if (!previousId.isNullOrBlank()) put("previous_interaction_id", previousId)
@@ -322,7 +329,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                     say(message)
                 }
-            } finally { connection?.disconnect() }
+            } finally {
+                connection?.disconnect()
+                runOnUiThread {
+                    geminiBusy = false
+                    status.text = "SYSTEM READY"
+                }
+            }
         }
     }
 
