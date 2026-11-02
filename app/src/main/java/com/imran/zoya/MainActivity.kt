@@ -157,6 +157,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val s = raw.trim()
         val lower = s.lowercase(Locale.ROOT)
         when {
+            lower in listOf("assalamualaikum", "assalamu alaikum", "salam", "salaam", "hello", "hi", "hey", "नमस्ते", "नमस्कार", "सलाम", "अस्सलामुअलैकुम") ||
+                lower.startsWith("assalamualaikum ") || lower.startsWith("assalamu alaikum ") ||
+                lower.startsWith("hello ") || lower.startsWith("hi ") || lower.startsWith("नमस्ते ") ||
+                lower.startsWith("सलाम ") || lower.startsWith("अस्सलामुअलैकुम ") ->
+                say("वअलैकुम अस्सलाम! मैं ज़ोया हूँ। बताइए, मैं आपकी क्या मदद करूँ?")
             lower.contains("समय") || lower.contains("time") ->
                 say("अभी समय है " + java.text.SimpleDateFormat("hh:mm a", Locale.getDefault()).format(java.util.Date()))
             lower.contains("google") || lower.contains("गूगल") || lower.contains("search") || lower.contains("सर्च") ||
