@@ -156,11 +156,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun command(raw: String) {
         val s = raw.trim()
         val lower = s.lowercase(Locale.ROOT)
+        val greetingText = lower.trim()
+            .replace(Regex("[^\\p{L}\\p{N}\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        val greetingWords = greetingText.split(" ").filter { it.isNotBlank() }
+        val isGreeting = greetingWords.firstOrNull() in setOf(
+            "assalamualaikum", "assalamu", "alaikum", "salam", "salaam",
+            "hello", "hi", "hey", "नमस्ते", "नमस्कार", "सलाम", "अस्सलामुअलैकुम"
+        ) && (greetingWords.size <= 3 || greetingWords.take(2) == listOf("assalamu", "alaikum"))
         when {
-            lower in listOf("assalamualaikum", "assalamu alaikum", "salam", "salaam", "hello", "hi", "hey", "नमस्ते", "नमस्कार", "सलाम", "अस्सलामुअलैकुम") ||
-                lower.startsWith("assalamualaikum ") || lower.startsWith("assalamu alaikum ") ||
-                lower.startsWith("hello ") || lower.startsWith("hi ") || lower.startsWith("नमस्ते ") ||
-                lower.startsWith("सलाम ") || lower.startsWith("अस्सलामुअलैकुम ") ->
+            isGreeting ->
                 say("वअलैकुम अस्सलाम! मैं ज़ोया हूँ। बताइए, मैं आपकी क्या मदद करूँ?")
             lower.contains("समय") || lower.contains("time") ->
                 say("अभी समय है " + java.text.SimpleDateFormat("hh:mm a", Locale.getDefault()).format(java.util.Date()))
