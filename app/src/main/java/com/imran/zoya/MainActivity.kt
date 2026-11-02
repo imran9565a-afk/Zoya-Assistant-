@@ -272,7 +272,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (interactionId.isNotBlank()) securePrefs.edit().putString("gemini_previous_interaction_id", interactionId).apply()
                 var answer = json.optString("output_text", "").trim()
                 if (answer.isBlank()) {
-                    val outputItems = json.optJSONArray("output")
+                    val outputItems = json.optJSONArray("steps") ?: json.optJSONArray("output")
                     if (outputItems != null) {
                         val pieces = ArrayList<String>()
                         for (i in 0 until outputItems.length()) {
@@ -280,8 +280,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             val content = item.optJSONArray("content")
                             if (content != null) for (j in 0 until content.length()) {
                                 val part = content.optJSONObject(j) ?: continue
-                                val t = part.optString("text", "")
-                                if (t.isNotBlank()) pieces.add(t)
+                                if (part.optString("type", "") == "text" || part.has("text")) {
+                                    val t = part.optString("text", "")
+                                    if (t.isNotBlank()) pieces.add(t)
+                                }
                             }
                         }
                         answer = pieces.joinToString("\n").trim()
@@ -304,7 +306,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             securePrefs.edit().remove("gemini_previous_interaction_id").apply()
                             "Gemini अनुरोध स्वीकार नहीं हुआ। एक बार फिर वही सवाल भेजें।"
                         }
-                        else -> "Gemini से कनेक्शन नहीं हो पाया। इंटरनेट और API सेटिंग जाँचें।"
+                        else -> "Gemini कनेक्शन त्रुटि: " + (e.message ?: "अज्ञात समस्या").take(220)
                     }
                     say(message)
                 }
