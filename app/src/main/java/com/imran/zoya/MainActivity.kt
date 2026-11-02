@@ -258,8 +258,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 for (attempt in 0..2) {
                     connection = (URL("https://generativelanguage.googleapis.com/v1beta/interactions").openConnection() as HttpURLConnection).apply {
                         requestMethod = "POST"
-                        connectTimeout = 20000
-                        readTimeout = 60000
+                        connectTimeout = 45000
+                        readTimeout = 120000
                         doOutput = true
                         setRequestProperty("Content-Type", "application/json; charset=utf-8")
                         setRequestProperty("Accept", "application/json")
@@ -312,6 +312,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val message = when {
                         e.message?.contains("401") == true || e.message?.contains("403") == true -> "Gemini API Key गलत है या अनुमति नहीं मिली। ऐप में Key दोबारा जाँचें।"
                         e.message?.contains("503") == true -> "Gemini सर्वर अभी व्यस्त है। ZOYA ने 3 बार कोशिश की, लेकिन सेवा उपलब्ध नहीं हुई। 1-2 मिनट बाद फिर पूछें।"
+                        e is java.net.SocketTimeoutException -> "Gemini का जवाब आने में बहुत समय लग रहा है। इंटरनेट कनेक्शन जाँचें और थोड़ी देर बाद फिर कोशिश करें।"
                         e.message?.contains("429") == true -> "Gemini की उपयोग सीमा पूरी हो गई है। कुछ देर बाद कोशिश करें या AI Studio में quota जाँचें।"
                         e.message?.contains("400") == true -> {
                             securePrefs.edit().remove("gemini_previous_interaction_id").apply()
