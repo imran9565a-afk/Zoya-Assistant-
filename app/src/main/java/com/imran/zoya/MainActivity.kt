@@ -253,19 +253,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     put("system_instruction", "You are Zoya, a helpful, friendly AI assistant. Reply naturally and clearly in the same language as the user. Prefer Hindi when the user writes Hindi. Be accurate; if unsure, say so.")
                     if (!previousId.isNullOrBlank()) put("previous_interaction_id", previousId)
                 }
-                connection = (URL("https://generativelanguage.googleapis.com/v1beta/interactions").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 20000
-                    readTimeout = 60000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("Accept", "application/json")
-                    setRequestProperty("x-goog-api-key", key)
+                var code = 0
+                var body = ""
+                for (attempt in 0..2) {
+                    connection = (URL("https://generativelanguage.googleapis.com/v1beta/interactions").openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 20000
+                        readTimeout = 60000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        setRequestProperty("Accept", "application/json")
+                        setRequestProperty("x-goog-api-key", key)
+                    }
+                    connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                    code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                    if (code == 503 && attempt < 2) {
+                        connection.disconnect()
+                        Thread.sleep(1000L shl attempt)
+                        continue
+                    }
+                    break
                 }
-                connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-                val code = connection.responseCode
-                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                val body = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 if (code !in 200..299) throw Exception("API error $code: " + body.take(500))
                 val json = JSONObject(body)
                 val interactionId = json.optString("id", "")
@@ -301,6 +311,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     status.text = "SYSTEM READY"
                     val message = when {
                         e.message?.contains("401") == true || e.message?.contains("403") == true -> "Gemini API Key गलत है या अनुमति नहीं मिली। ऐप में Key दोबारा जाँचें।"
+                        e.message?.contains("503") == true -> "Gemini सर्वर अभी व्यस्त है। ZOYA ने 3 बार कोशिश की, लेकिन सेवा उपलब्ध नहीं हुई। 1-2 मिनट बाद फिर पूछें।"
                         e.message?.contains("429") == true -> "Gemini की उपयोग सीमा पूरी हो गई है। कुछ देर बाद कोशिश करें या AI Studio में quota जाँचें।"
                         e.message?.contains("400") == true -> {
                             securePrefs.edit().remove("gemini_previous_interaction_id").apply()
