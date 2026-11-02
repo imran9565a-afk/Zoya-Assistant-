@@ -192,7 +192,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val n = 35
             val gap = width.toFloat() / (n + 1)
             for (i in 0 until n) {
-                val h = if (active) 12f + abs(sin(i * .45 + phase)) * 48f else 7f + abs(sin(i * .45)) * 10f
+                val h = if (active) (12.0 + abs(sin(i * .45 + phase)) * 48.0).toFloat() else (7.0 + abs(sin(i * .45)) * 10.0).toFloat()
                 canvas.drawLine(gap * (i + 1), height / 2f - h, gap * (i + 1), height / 2f + h, p)
             }
             if (active) { phase += .25; postInvalidateDelayed(35) }
