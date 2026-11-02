@@ -41,6 +41,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var recognizer: SpeechRecognizer? = null
     private val securePrefs by lazy { getSharedPreferences("zoya_secure", MODE_PRIVATE) }
     private val tinyFishAlias = "ZoyaTinyFishKey"
+    private val geminiAlias = "ZoyaGeminiKey"
     private val networkExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +84,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(Button(this).apply {
             text = "SET TINYFISH API KEY"
             setOnClickListener { showTinyFishKeyDialog() }
+        })
+        root.addView(Button(this).apply {
+            text = "SET GEMINI API KEY"
+            setOnClickListener { showGeminiKeyDialog() }
         })
         output = TextView(this).apply {
             text = "Zoya: नमस्ते! Voice या text से बात शुरू करो।"
@@ -213,8 +218,137 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
             }
             else ->
-                say("मैं अभी इस सवाल का जवाब खुद नहीं बना पा रही हूँ। इंटरनेट पर खोजने के लिए 'खोजो' या 'search' लिखें।")
+                chatWithGemini(s)
         }
+    }
+
+
+    private fun readGeminiApiKey(): String? {
+        return try {
+            val encoded = securePrefs.getString("gemini_api_key", null) ?: return null
+            val packed = Base64.decode(encoded, Base64.NO_WRAP)
+            if (packed.size <= 12) return null
+            val iv = packed.copyOfRange(0, 12)
+            val encrypted = packed.copyOfRange(12, packed.size)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, getGeminiSecretKey(), GCMParameterSpec(128, iv))
+            String(cipher.doFinal(encrypted), Charsets.UTF_8)
+        } catch (_: Exception) { null }
+    }
+
+    private fun chatWithGemini(query: String) {
+        val key = readGeminiApiKey()
+        if (key.isNullOrBlank()) {
+            say("पहले SET GEMINI API KEY में अपनी Gemini API Key सेव करें।")
+            return
+        }
+        status.text = "ZOYA AI THINKING"
+        networkExecutor.execute {
+            var connection: HttpURLConnection? = null
+            try {
+                val previousId = securePrefs.getString("gemini_previous_interaction_id", null)
+                val payload = JSONObject().apply {
+                    put("model", "gemini-3.8-flash")
+                    put("input", query)
+                    put("system_instruction", "You are Zoya, a helpful, friendly AI assistant. Reply naturally and clearly in the same language as the user. Prefer Hindi when the user writes Hindi. Be accurate; if unsure, say so.")
+                    if (!previousId.isNullOrBlank()) put("previous_interaction_id", previousId)
+                }
+                connection = (URL("https://generativelanguage.googleapis.com/v1beta/interactions").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 20000
+                    readTimeout = 60000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("x-goog-api-key", key)
+                }
+                connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val body = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                if (code !in 200..299) throw Exception("API error $code: " + body.take(500))
+                val json = JSONObject(body)
+                val interactionId = json.optString("id", "")
+                if (interactionId.isNotBlank()) securePrefs.edit().putString("gemini_previous_interaction_id", interactionId).apply()
+                var answer = json.optString("output_text", "").trim()
+                if (answer.isBlank()) {
+                    val outputItems = json.optJSONArray("output")
+                    if (outputItems != null) {
+                        val pieces = ArrayList<String>()
+                        for (i in 0 until outputItems.length()) {
+                            val item = outputItems.optJSONObject(i) ?: continue
+                            val content = item.optJSONArray("content")
+                            if (content != null) for (j in 0 until content.length()) {
+                                val part = content.optJSONObject(j) ?: continue
+                                val t = part.optString("text", "")
+                                if (t.isNotBlank()) pieces.add(t)
+                            }
+                        }
+                        answer = pieces.joinToString("\n").trim()
+                    }
+                }
+                if (answer.isBlank()) answer = "मुझे इस बार जवाब नहीं मिला। कृपया फिर से पूछें।"
+                val finalAnswer = answer
+                runOnUiThread {
+                    status.text = "SYSTEM READY"
+                    line("Zoya: $finalAnswer")
+                    tts?.speak(finalAnswer, TextToSpeech.QUEUE_FLUSH, null, "zoya_gemini")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    status.text = "SYSTEM READY"
+                    val message = when {
+                        e.message?.contains("401") == true || e.message?.contains("403") == true -> "Gemini API Key गलत है या अनुमति नहीं मिली। ऐप में Key दोबारा जाँचें।"
+                        e.message?.contains("429") == true -> "Gemini की उपयोग सीमा पूरी हो गई है। कुछ देर बाद कोशिश करें या AI Studio में quota जाँचें।"
+                        e.message?.contains("400") == true -> {
+                            securePrefs.edit().remove("gemini_previous_interaction_id").apply()
+                            "Gemini अनुरोध स्वीकार नहीं हुआ। एक बार फिर वही सवाल भेजें।"
+                        }
+                        else -> "Gemini से कनेक्शन नहीं हो पाया। इंटरनेट और API सेटिंग जाँचें।"
+                    }
+                    say(message)
+                }
+            } finally { connection?.disconnect() }
+        }
+    }
+
+    private fun showGeminiKeyDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste Gemini API key here"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Gemini API Key")
+            .setMessage("अपनी Gemini Key यहाँ ऐप में डालें। यह फोन में encrypted रूप में सेव होगी। इसे किसी के साथ साझा न करें।")
+            .setView(input)
+            .setPositiveButton("SAVE") { _, _ ->
+                val value = input.text.toString().trim()
+                if (value.isNotEmpty()) try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.ENCRYPT_MODE, getGeminiSecretKey())
+                    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                    val packed = cipher.iv + encrypted
+                    securePrefs.edit().putString("gemini_api_key", Base64.encodeToString(packed, Base64.NO_WRAP))
+                        .remove("gemini_previous_interaction_id").apply()
+                    say("Gemini API Key इस फोन में encrypted रूप में सेव हो गई है।")
+                } catch (_: Exception) { say("Gemini Key सेव नहीं हो सकी। कृपया दोबारा कोशिश करें।") }
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
+    private fun getGeminiSecretKey(): SecretKey {
+        val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val saved = store.getKey(geminiAlias, null) as? SecretKey
+        if (saved != null) return saved
+        val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
+        generator.init(android.security.keystore.KeyGenParameterSpec.Builder(
+            geminiAlias,
+            android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+        ).setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true).build())
+        return generator.generateKey()
     }
 
     private fun readTinyFishApiKey(): String? {
