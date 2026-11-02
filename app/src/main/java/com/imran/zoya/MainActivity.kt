@@ -20,6 +20,11 @@ import android.widget.*
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.sin
+import android.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val green = Color.rgb(57, 255, 120)
@@ -29,6 +34,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var wave: WaveView
     private var tts: TextToSpeech? = null
     private var recognizer: SpeechRecognizer? = null
+    private val securePrefs by lazy { getSharedPreferences("zoya_secure", MODE_PRIVATE) }
+    private val tinyFishAlias = "ZoyaTinyFishKey"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +74,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { listen() }
         }
         root.addView(listen)
+        root.addView(Button(this).apply {
+            text = "SET TINYFISH API KEY"
+            setOnClickListener { showTinyFishKeyDialog() }
+        })
         output = TextView(this).apply {
             text = "Zoya: नमस्ते! Voice या text से बात शुरू करो।"
             textSize = 15f
@@ -166,6 +177,50 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             else -> say("मैंने सुना: $s। सामान्य AI जवाबों के लिए अभी सुरक्षित AI API connection जोड़ना बाकी है।")
         }
+    }
+
+
+    private fun showTinyFishKeyDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste TinyFish API key here"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this)
+            .setTitle("TinyFish API Key")
+            .setMessage("Key केवल इस फोन में encrypted रूप में सेव होगी। इसे किसी के साथ साझा न करें।")
+            .setView(input)
+            .setPositiveButton("SAVE") { _, _ ->
+                val value = input.text.toString().trim()
+                if (value.isNotEmpty()) {
+                    try {
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                        cipher.init(Cipher.ENCRYPT_MODE, getTinyFishSecretKey())
+                        val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                        val packed = cipher.iv + encrypted
+                        securePrefs.edit().putString("tinyfish_api_key", Base64.encodeToString(packed, Base64.NO_WRAP)).apply()
+                        say("TinyFish API Key इस फोन में सुरक्षित सेव हो गई है।")
+                    } catch (_: Exception) {
+                        say("Key सेव नहीं हो सकी। कृपया दोबारा कोशिश करें।")
+                    }
+                }
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
+    private fun getTinyFishSecretKey(): SecretKey {
+        val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val saved = store.getKey(tinyFishAlias, null) as? SecretKey
+        if (saved != null) return saved
+        val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
+        generator.init(android.security.keystore.KeyGenParameterSpec.Builder(
+            tinyFishAlias,
+            android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+        ).setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build())
+        return generator.generateKey()
     }
 
     private fun contactNumber(name: String): String? {
