@@ -183,6 +183,53 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             normalized.startsWith("अस्सलामुअलैकुम ")
 
         when {
+            normalized == "help" || normalized == "commands" || normalized == "मदद" || normalized == "कमांड बताओ" || normalized == "क्या कर सकती हो" ->
+                say("आप मुझसे समय और तारीख पूछ सकते हैं, कैलकुलेटर चला सकते हैं, नोट याद रखवा सकते हैं, अलार्म लगा सकते हैं, ऐप या वेबसाइट खोल सकते हैं, Google पर खोज सकते हैं, कॉल और SMS स्क्रीन खोल सकते हैं। उदाहरण: याद रखो कल दूध लेना, मेरा नोट दिखाओ, 25 गुणा 4 कितना है, 7:30 का अलार्म लगाओ, YouTube खोलो।")
+            normalized.startsWith("याद रखो ") || normalized.startsWith("याद रखना ") || normalized.startsWith("remember ") || normalized.startsWith("note ") -> {
+                val note = s.replace(Regex("(?i)^(याद रखो|याद रखना|remember|note)\\s*"), "").trim()
+                if (note.isBlank()) say("क्या याद रखना है, बताइए।")
+                else { securePrefs.edit().putString("zoya_last_note", note).apply(); say("ठीक है, मैंने याद रख लिया: $note") }
+            }
+            normalized in setOf("मेरा नोट दिखाओ", "नोट दिखाओ", "show note", "show my note", "मुझे क्या याद है", "याद दिलाओ") -> {
+                val note = securePrefs.getString("zoya_last_note", null)
+                say(if (note.isNullOrBlank()) "अभी आपने कोई नोट सेव नहीं कराया है।" else "आपका सेव किया हुआ नोट है: $note")
+            }
+            normalized.startsWith("गणना ") || normalized.startsWith("calculate ") || normalized.startsWith("कैलकुलेट ") || normalized.startsWith("कितना होता है ") || normalized.matches(Regex(".*\\d+.*(जोड़|प्लस|minus|घटा|गुणा|मल्टीप्लाई|भाग|divide).*")) -> {
+                val result = calculateSimple(s)
+                say(result ?: "कृपया ऐसे पूछें: 25 गुणा 4 कितना होता है, या calculate 25 * 4")
+            }
+            normalized.contains("अलार्म") || normalized.contains("alarm") -> {
+                val match = Regex("(\\d{1,2})[:.](\\d{2})").find(s)
+                val hourMatch = Regex("(\\d{1,2})\\s*(?:बजे|am|pm)", RegexOption.IGNORE_CASE).find(s)
+                val hour = match?.groupValues?.get(1)?.toIntOrNull() ?: hourMatch?.groupValues?.get(1)?.toIntOrNull()
+                val minute = match?.groupValues?.get(2)?.toIntOrNull() ?: 0
+                if (hour == null || hour !in 0..23 || minute !in 0..59) say("समय बताइए, जैसे 7:30 का अलार्म लगाओ।")
+                else {
+                    val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour).putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute).putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Zoya Alarm")
+                    if (intent.resolveActivity(packageManager) != null) { startActivity(intent); say("अलार्म सेट करने की स्क्रीन खोल रही हूँ।") } else say("इस फोन में अलार्म ऐप उपलब्ध नहीं है।")
+                }
+            }
+            normalized.startsWith("खोलो ") || normalized.startsWith("open ") || normalized.startsWith("launch ") -> {
+                val target = s.replace(Regex("(?i)^(खोलो|open|launch)\\s*"), "").trim()
+                openAppOrWebsite(target)
+            }
+            normalized.startsWith("वेबसाइट ") || normalized.startsWith("website ") || normalized.startsWith("खोल वेबसाइट ") -> {
+                val target = s.replace(Regex("(?i)^(वेबसाइट|website|खोल वेबसाइट)\\s*"), "").trim()
+                openAppOrWebsite(target, true)
+            }
+            normalized.contains("व्हाट्सएप") || normalized.contains("whatsapp") -> {
+                val intent = packageManager.getLaunchIntentForPackage("com.whatsapp")
+                if (intent != null) { startActivity(intent); say("WhatsApp खोल रही हूँ।") }
+                else { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.whatsapp.com/"))); say("WhatsApp वेबसाइट खोल रही हूँ।") }
+            }
+            normalized in setOf("आज की तारीख", "तारीख बताओ", "date", "what is the date", "आज कौन सी तारीख है") ->
+                say("आज की तारीख है " + java.text.SimpleDateFormat("dd MMMM yyyy", Locale("hi", "IN")).format(java.util.Date()))
+            normalized in setOf("बैटरी कितनी है", "battery", "battery status", "बैटरी बताओ") -> {
+                val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val level = battery?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val scale = battery?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+                say(if (level >= 0) "फोन की बैटरी " + (level * 100 / scale) + " प्रतिशत है।" else "बैटरी की जानकारी नहीं मिल सकी।")
+            }
             isGreeting ->
                 say("वअलैकुम अस्सलाम! मैं ज़ोया हूँ। बताइए, मैं आपकी क्या मदद करूँ?")
             normalized in setOf("how are you", "how are you doing", "कैसे हो", "कैसी हो", "आप कैसे हैं", "तुम कैसी हो") ->
@@ -223,6 +270,38 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+
+    private fun calculateSimple(raw: String): String? {
+        val text = raw.lowercase(Locale.ROOT)
+            .replace("कितना होता है", "").replace("कितना", "")
+            .replace("गणना", "").replace("कैलकुलेट", "").replace("calculate", "")
+            .replace("जोड़", "+").replace("प्लस", "+").replace("plus", "+")
+            .replace("घटा", "-").replace("माइनस", "-").replace("minus", "-")
+            .replace("गुणा", "*").replace("मल्टीप्लाई", "*").replace("multiply", "*").replace("into", "*")
+            .replace("भाग", "/").replace("डिवाइड", "/").replace("divide", "/").trim()
+        val m = Regex("^\\s*(-?\\d+(?:\\.\\d+)?)\\s*([+*/-])\\s*(-?\\d+(?:\\.\\d+)?)\\s*$").find(text) ?: return null
+        val a = m.groupValues[1].toDoubleOrNull() ?: return null
+        val b = m.groupValues[3].toDoubleOrNull() ?: return null
+        val value = when (m.groupValues[2]) { "+" -> a + b; "-" -> a - b; "*" -> a * b; "/" -> if (b != 0.0) a / b else return "शून्य से भाग नहीं कर सकते।"; else -> return null }
+        return "जवाब है " + (if (value % 1.0 == 0.0) value.toLong().toString() else value.toString())
+    }
+
+    private fun openAppOrWebsite(target: String, forceWebsite: Boolean = false) {
+        if (target.isBlank()) { say("कौन सा ऐप या वेबसाइट खोलनी है?"); return }
+        val knownSites = mapOf("google" to "https://www.google.com", "गूगल" to "https://www.google.com", "youtube" to "https://www.youtube.com", "यूट्यूब" to "https://www.youtube.com", "facebook" to "https://www.facebook.com", "फेसबुक" to "https://www.facebook.com", "instagram" to "https://www.instagram.com", "इंस्टाग्राम" to "https://www.instagram.com")
+        val site = knownSites[target.lowercase(Locale.ROOT)]
+        if (forceWebsite || target.contains(".") || site != null) {
+            val url = site ?: if (target.startsWith("http")) target else "https://$target"
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))); say("वेबसाइट खोल रही हूँ।") }
+            catch (_: Exception) { say("यह वेबसाइट नहीं खुल सकी।") }
+            return
+        }
+        val packages = packageManager.getInstalledApplications(0)
+        val app = packages.firstOrNull { packageManager.getApplicationLabel(it).toString().equals(target, true) || packageManager.getApplicationLabel(it).toString().contains(target, true) }
+        val launch = app?.let { packageManager.getLaunchIntentForPackage(it.packageName) }
+        if (launch != null) { startActivity(launch); say("$target ऐप खोल रही हूँ।") }
+        else say("$target ऐप नहीं मिला।")
+    }
 
     private fun readGeminiApiKey(): String? {
         return try {
